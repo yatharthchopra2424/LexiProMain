@@ -16,23 +16,45 @@ export default function OutcomePredictorPage() {
   const [caseType, setCaseType] = useState("")
   const [caseDescription, setCaseDescription] = useState("")
   const [relevantLaws, setRelevantLaws] = useState("")
-  const [prediction, setPrediction] = useState<any | null>(null)
+  const [predictionResult, setPredictionResult] = useState<{
+    initial: string;
+    expanded: string;
+  } | null>(null)
   const [debugInfo, setDebugInfo] = useState<any | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
 
+  // Example templates for Legalbert Mask model
+  const examples = [
+    {
+      type: "criminal",
+      title: "Criminal Case Example",
+      text: "The applicant submitted that her husband was subjected to treatment amounting to [MASK] whilst in the custody of the Adana Security Directorate."
+    },
+    {
+      type: "contract",
+      title: "Contract Dispute Example",
+      text: "The client is suing a contractor for breach of contract due to [MASK] on a residential property renovation project."
+    },
+    {
+      type: "employment",
+      title: "Employment Dispute Example",
+      text: "The plaintiff alleges they were terminated from their position due to [MASK] which violates employment discrimination laws."
+    }
+  ];
+
   const handlePredictOutcome = async () => {
-    if (!caseType || !caseDescription || !relevantLaws) {
+    if (!caseType || !caseDescription) {
       toast({
         title: "Missing Information",
-        description: "Please fill in all fields to get a prediction.",
+        description: "Please fill in required fields to get a prediction.",
         variant: "destructive",
       })
       return
     }
 
     setIsLoading(true)
-    setPrediction(null)
+    setPredictionResult(null)
     setDebugInfo(null)
     try {
       const response = await fetch('/api/prediction', {
@@ -47,9 +69,30 @@ export default function OutcomePredictorPage() {
         throw new Error('Failed to get prediction');
       }
 
-      const data = await response.json();
-      setPrediction(data.hfResponse);
-      setDebugInfo(data);
+      const initialData = await response.json();
+      
+      // Automatically expand with Gemini
+      const expandResponse = await fetch('/api/prediction/expand', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          caseType,
+          caseDescription,
+          relevantLaws,
+          prediction: initialData.hfResponse[0].sequence
+        }),
+      });
+
+      if (!expandResponse.ok) throw new Error('Failed to expand analysis');
+      const expandData = await expandResponse.json();
+
+      setPredictionResult({
+        initial: initialData.hfResponse[0].sequence,
+        expanded: expandData.expandedAnalysis
+      });
+      setDebugInfo(initialData);
     } catch (error) {
       console.error('Error predicting outcome:', error);
       toast({
@@ -93,12 +136,12 @@ export default function OutcomePredictorPage() {
                   <SelectValue placeholder="Select case type" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-900 border-gray-700 text-white">
-                  <SelectItem value="contract">Contract Law</SelectItem>
-                  <SelectItem value="criminal">Criminal Law</SelectItem>
-                  <SelectItem value="property">Property Law</SelectItem>
-                  <SelectItem value="family">Family Law</SelectItem>
-                  <SelectItem value="corporate">Corporate Law</SelectItem>
+                  <SelectItem value="contract">Contract Dispute</SelectItem>
+                  <SelectItem value="criminal">Criminal Case</SelectItem>
+                  <SelectItem value="personal_injury">Personal Injury</SelectItem>
+                  <SelectItem value="employment">Employment Dispute</SelectItem>
                   <SelectItem value="intellectual_property">Intellectual Property</SelectItem>
+                  <SelectItem value="family">Family Law</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -109,7 +152,7 @@ export default function OutcomePredictorPage() {
               </Label>
               <Textarea
                 id="case-description"
-                placeholder="Summarize the key facts, parties involved, and the core dispute. E.g., 'Client is suing a contractor for breach of contract due to unfinished work on a residential property. Contractor claims delays were due to unforeseen material shortages.'"
+                placeholder="Summarize the Key Facts: Detail the essential facts including parties involved (Plaintiff/Defendant), nature of dispute, and circumstances leading to the case. Example: 'Client is suing a contractor for breach of contract due to unfinished work on a residential property. The contractor claims delays were caused by unforeseen material shortages.'"
                 value={caseDescription}
                 onChange={(e) => setCaseDescription(e.target.value)}
                 className="min-h-[120px] bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus-visible:ring-yellow-400"
@@ -123,12 +166,32 @@ export default function OutcomePredictorPage() {
               </Label>
               <Input
                 id="relevant-laws"
-                placeholder="e.g., Indian Contract Act, Specific Relief Act, landmark judgments"
+                placeholder="Provide applicable laws or legal precedents (optional). Example: 'Indian Contract Act, Section 73 - Compensation for breach of contract'"
                 value={relevantLaws}
                 onChange={(e) => setRelevantLaws(e.target.value)}
                 className="bg-gray-800/50 border-gray-700 text-white placeholder:text-gray-500 focus-visible:ring-yellow-400"
                 disabled={isLoading}
               />
+            </div>
+
+            {/* Example Templates */}
+            <div className="grid gap-2">
+              <Label className="text-gray-300">Example Templates</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {examples.map((example, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    className="text-left h-auto py-2 bg-gray-800/50 border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white"
+                    onClick={() => {
+                      setCaseType(example.type)
+                      setCaseDescription(example.text)
+                    }}
+                  >
+                    <div className="text-xs">{example.title}</div>
+                  </Button>
+                ))}
+              </div>
             </div>
 
             <Button
@@ -149,18 +212,32 @@ export default function OutcomePredictorPage() {
           </CardContent>
         </Card>
 
-        {prediction !== null && (
-          <Card className="bg-white/5 backdrop-blur-sm border-white/10">
-            <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
-                <Gavel className="w-5 h-5 text-yellow-400" />
-                Prediction
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-white">{prediction[0].sequence}</p>
-            </CardContent>
-          </Card>
+        {predictionResult && (
+          <div className="space-y-4">
+            <Card className="bg-white/5 backdrop-blur-sm border-white/10">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Gavel className="w-5 h-5 text-yellow-400" />
+                  Initial Prediction
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-white">{predictionResult.initial}</p>
+              </CardContent>
+            </Card>
+            
+            <Card className="bg-white/5 backdrop-blur-sm border-white/10">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Lightbulb className="w-5 h-5 text-blue-400" />
+                  Analysis
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-white">{predictionResult.expanded}</p>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
       </div>
