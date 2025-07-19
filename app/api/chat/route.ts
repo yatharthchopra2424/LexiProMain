@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     const chat = model.startChat({
       history,
       generationConfig: {
-        maxOutputTokens: 1000,
+        maxOutputTokens: 4096,
       },
     systemInstruction: {
       role: "model",
